@@ -4,7 +4,7 @@ library(terra)
 library(tidyterra)
 library(mapboxapi)
 
-setwd("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/")
+setwd("E:/NCF_Public_Access/Case_Studies/")
 
 # AOI same size as original Warrington example
 
@@ -40,10 +40,10 @@ aoi = vect(x = df_aoi,
 
 # Import Data
 
-accp = vect("Y:/PersonalFolders/AliceH/Handovers/NCF_Public_Access/Data/Downloaded_data/OS_data/OS_Greenspace_AccessPoints.shp",
+accp = vect("Z:/CESB/Land Use and Ecosystem Service/LUES_Sware/PersonalFolders/AliceH/Handovers/NCF_Public_Access/Data/Downloaded_data/OS_data/OS_Greenspace_AccessPoints.shp",
             extent = aoi)
 
-prows = vect("Y:/ExternalProjects/NCF Access/NE_greenspace/Green_and_Blue_Infrastructure_NE_GeoPackage - working copy/Green_and_Blue_Infrastructure_NE_GeoPackage/Green_Infrastructure_Linear_Access/Linear_access_network.gpkg",
+prows = vect("Z:/CESB/Land Use and Ecosystem Service/LUES_Sware/ExternalProjects/NCF Access/NE_greenspace/Green_and_Blue_Infrastructure_NE_GeoPackage - working copy/Green_and_Blue_Infrastructure_NE_GeoPackage/Green_Infrastructure_Linear_Access/Linear_access_network.gpkg",
              layer = "Map5_England_PROW_Update2022",
              extent = aoi) %>% crop(aoi)
 
@@ -51,7 +51,7 @@ roads = vect("Z:/CESB/Land Use and Ecosystem Service/GIS_Data/_Data/OS_data/OS_O
              layer = "road_link",
              extent = aoi) %>% crop(aoi)
 
-woodlands_ne = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/NE_GreenInfrastructure/Green_Infrastructure_access_maps.gpkg",  # cannot access file in Projects folder for some reason
+woodlands_ne = vect("Z:/CESB/Land Use and Ecosystem Service/LUES_Sware/PersonalFolders/Joe/Data/NE_GreenInfrastructure/Green_Infrastructure_access_maps.gpkg",  # cannot access file in Projects folder for some reason
                     layer = "Map4_woodlands",
                     extent = aoi) %>% crop(aoi)
 
@@ -63,11 +63,12 @@ woodlands_ne_acc = woodlands_ne %>%
 #  crop(aoi) %>%
 #  rename("restricted_information" = "restricted information")
 
-imd = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Data/Lower_Super_Output_Area_(LSOA)_IMD_2019__(OSGB1936)/Exported from ArcGIS proj corrected/Export_Output.shp")
+imd = vect("Z:/CESB/Land Use and Ecosystem Service/LUES_Sware/PersonalFolders/Joe/Data/Lower_Super_Output_Area_(LSOA)_IMD_2019__(OSGB1936)/Exported from ArcGIS proj corrected/Export_Output.shp")
 
-popden = read_csv("Y:/PersonalFolders/Joe/NCF_Public_Access/Data/sape23dt11mid2020lsoapopulationdensity_popden.csv") %>% 
+popden = read_csv("Z:/CESB/Land Use and Ecosystem Service/LUES_Sware/PersonalFolders/Joe/Data/sape23dt11mid2020lsoapopulationdensity_popden.csv") %>% 
   rename("LSOA.Code" = "LSOA Code",
          "People_per_Sq_Km" = "People per Sq Km")
+
 
 
 
