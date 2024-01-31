@@ -1,0 +1,878 @@
+---
+title: "Case Studies (Jan-24)"
+output: html_document
+date: "2024-01-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preamble
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(ggnewscale)
+library(sf)
+library(terra)
+library(tidyterra)
+library(mapboxapi)
+
+# run setwd in console
+
+setwd("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/")
+```
+
+# Palettes
+```{r, warning=FALSE}
+pal_accp = c("Pedestrian" = "#137FF5",
+             "Motor Vehicle And Pedestrian" = "#BF32D6",
+             "Motor Vehicle" = "#EAE01E",
+             "PROW" = "#C00000")
+
+pal_euc = "red"
+
+pal_prows = "#699D45"
+
+pal_roads = "darkgrey"
+
+pal_woodlands = c("Accessible" = "#C0E2B4", 
+                  "Non Accessible" = "#EEBAAC",
+                  "restricted" = "red",
+                  "unrestricted" = "darkgreen")
+```
+
+# Warrington AOI and IMD dataset
+
+```{r, warning=FALSE}
+warr = vect("Y:/PersonalFolders/AliceH/Handovers/NCF_Public_Access/Data/Warrington_small_square/warrington_local_area.shp")
+
+warr_woodlands_ne = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/NE_GreenInfrastructure/Green_Infrastructure_access_maps.gpkg",  # cannot access file in Projects folder for some reason
+                         layer = "Map4_woodlands",
+                         extent = warr) %>% crop(warr)
+
+# how to extract ymax, ymin, etc directly?
+
+height = 393073.7 - 386287.1
+width = 363036.1 - 354207.3
+```
+
+
+
+# Northampton
+
+## Data Handling
+
+### AOI
+
+Create AOI around Northampton the same size as the original Warrington example.
+
+```{r, warning=FALSE}
+nor_east = 475423
+nor_north = 260435
+
+nor_df = tibble(
+  "Corner" = c("NW", "NE", "SW", "SE"),
+  "x" = c(nor_east-(width/2), nor_east+(width/2), nor_east-(width/2), nor_east+(width/2)),
+  "y" = c(nor_north+(height/2), nor_north+(height/2), nor_north-(height/2), nor_north-(height/2)))
+
+nor = vect(x = nor_df,
+           geom = c("x", "y"),
+           crs = "epsg:27700") %>%  # British National Grid
+  as.polygons(extent = T)
+```
+
+### Data Import
+
+```{r, warning=FALSE}
+nor_accp = vect("Y:/PersonalFolders/AliceH/Handovers/NCF_Public_Access/Data/Downloaded_data/OS_data/OS_Greenspace_AccessPoints.shp",
+                extent = nor)
+
+nor_prows = vect("Y:/ExternalProjects/NCF Access/NE_greenspace/Green_and_Blue_Infrastructure_NE_GeoPackage - working copy/Green_and_Blue_Infrastructure_NE_GeoPackage/Green_Infrastructure_Linear_Access/Linear_access_network.gpkg",
+                 layer = "Map5_England_PROW_Update2022",
+                 extent = nor) %>% crop(nor)
+
+nor_roads = vect("Z:/CESB/Land Use and Ecosystem Service/GIS_Data/_Data/OS_data/OS_Open_Data/oproad_gpkg_gb/Data/oproad_gb.gpkg",
+                  layer = "road_link",
+                  extent = nor) %>% crop(nor)
+
+nor_woodlands_ne = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/NE_GreenInfrastructure/Green_Infrastructure_access_maps.gpkg",  # cannot access file in Projects folder for some reason
+                         layer = "Map4_woodlands",
+                         extent = nor) %>% crop(nor)
+
+nor_woodlands_ne_acc = nor_woodlands_ne %>%
+  filter(AccessLevel == "Accessible")
+
+#nor_woodlands_w4p = vect("Y:/ExternalProjects/NCF Access/woods_for_people_2023 1.geojson",
+#                         extent = nor) %>%
+#  crop(nor) %>%
+#  rename("restricted_information" = "restricted information")
+```
+
+### Woodland Access Points
+
+```{r}
+nor_woodlands_ne_20m = buffer(nor_woodlands_ne, width = 20) %>% aggregate()
+nor_woodlands_ne_acc_20m = buffer(nor_woodlands_ne_acc, width = 20) %>% aggregate()
+
+nor_accp_ne = crop(nor_accp, nor_woodlands_ne_20m)
+nor_accp_ne_acc = crop(nor_accp, nor_woodlands_ne_acc_20m)
+```
+
+## Compare NE and W4P datasets
+
+```{r, warning=FALSE, fig.width=13}
+ggplot() + 
+  geom_spatvector(data = nor_woodlands_ne,
+                  mapping = aes(fill = AccessLevel),
+                  color = NA) +
+  scale_fill_manual("NE Woodlands",
+                    values = pal_woodlands) +
+  
+  geom_spatvector(data = nor_woodlands_w4p,
+                  mapping = aes(color = restricted_information),
+                  fill = NA,
+                  linewidth = 0.8) +
+  scale_color_manual("W4P Woodlands",
+                     values = c("red", "darkgreen")) +
+  
+  geom_spatvector(data = nor_roads,
+                  color = pal_roads) +
+  
+  #geom_spatvector(data = nor_prows,
+  #                color = pal_prows) +
+  
+  labs(title = "Comparing Woodland Datasets",
+       caption = "High Wycombe, UK") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+#ggsave("nor_woodland_datasets.png", x, dpi = 300, units = "cm", width = 35, height = 25)
+```
+
+
+## Woodland Access Standard (WT)
+
+500m from woodland >= 2ha and 4km from a woodland >= 20ha.
+
+Firstly filter those woodlands and identify associated access points. No woodlands >=20 ha.
+
+```{r, warning=FALSE, fig.width=13}
+nor_woodlands_ne_acc_2ha = nor_woodlands_ne_acc %>% filter(Area_ha >= 2)
+nor_woodlands_ne_acc_20ha = nor_woodlands_ne_acc %>% filter(Area_ha >= 20)
+
+nor_woodlands_ne_acc_2ha_20m = buffer(nor_woodlands_ne_acc_2ha, width = 20) %>% aggregate()
+#nor_woodlands_ne_acc_20ha_20m = buffer(nor_woodlands_ne_acc_20ha, width = 20) %>% aggregate()
+
+nor_accp_ne_acc_2ha = crop(nor_accp, nor_woodlands_ne_acc_2ha_20m)
+#nor_accp_ne_acc_20ha = crop(nor_accp, nor_woodlands_ne_acc_20ha_20m)
+```
+
+Euclidean
+
+```{r}
+nor_eucl_ne_acc_2ha_500m = 
+  nor_accp_ne_acc_2ha %>%
+  buffer(width = 500) %>%  # 500m
+  aggregate()
+```
+
+Path Network from QGIS
+
+```{r}
+nor_path_ne_acc_2ha_500m = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Path Networks/nor_path_ne_acc_2ha_500m.shp")
+
+nor_path_ne_acc_2ha_500m_buff = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Path Networks/nor_path_ne_acc_2ha_500m_buff50m.shp")
+```
+
+Isochrone
+
+```{r}
+nor_isochrone_ne_acc_2ha_500m = mb_isochrone(
+  st_as_sf(nor_accp_ne_acc_2ha),
+  distance = 500,
+  profile = "walking"
+) %>% 
+  st_transform(crs = 27700) %>% 
+  vect() %>% 
+  aggregate()
+```
+
+
+## Accessible Greenspace Standard (NE)
+
+15mins from accessible greenspace.
+
+Euclidean 
+
+```{r}
+nor_eucl_ne_acc_1260m = 
+  nor_accp_ne_acc %>%
+  buffer(width = 1260) %>%  # 15 mins walking at 1.4 m/s
+  aggregate()
+```
+
+Path Network from QGIS
+
+```{r}
+nor_path_ne_acc_1260m = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Path Networks/nor_path_ne_acc_1260m.shp")
+
+nor_path_ne_acc_1260m_buff = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Path Networks/nor_path_ne_acc_1260m_buff50m.shp")
+```
+
+Isochrone
+
+```{r}
+nor_isochrone_ne_acc_1260m = mb_isochrone(
+  st_as_sf(nor_accp_ne_acc),
+  distance = 1260,
+  profile = "walking"
+) %>% 
+  st_transform(crs = 27700) %>%
+  vect() %>% 
+  aggregate()
+```
+
+
+## IMD
+
+
+```{r}
+# create imd and popden before running function - not as tidy but less intensive than reading within function every time
+
+imd = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Data/Lower_Super_Output_Area_(LSOA)_IMD_2019__(OSGB1936)/Exported from ArcGIS proj corrected/Export_Output.shp")
+  
+popden = read_csv("Y:/PersonalFolders/Joe/NCF_Public_Access/Data/sape23dt11mid2020lsoapopulationdensity_popden.csv") %>% 
+  rename("LSOA.Code" = "LSOA Code",
+         "People_per_Sq_Km" = "People per Sq Km")
+    
+
+calc_imd = function(polygon) {
+  
+  poly = crop(polygon, aoi)
+  poly_imd = crop(imd, poly)
+  poly_imd_decil =
+    poly_imd %>% 
+    crop(aoi) %>% 
+    mutate("Area_sqkm" = expanse(poly_imd,
+                                 unit = "km")) %>% 
+    rename('LSOA.Code' = 'lsoa11cd') %>% 
+    merge(popden, by = "LSOA.Code") %>%
+    mutate("Area_pop" = Area_sqkm * People_per_Sq_Km) %>% 
+    group_by(IMDDecil) %>% 
+    mutate("Total_pop" = sum(Area_pop)) %>% 
+    distinct(IMDDecil, .keep_all = T) %>% 
+    as.data.frame() %>% 
+    arrange(IMDDecil) %>% 
+    select(IMDDecil, Total_pop)
+  
+  return(poly_imd_decil)
+}
+
+```
+
+Summary table. No woodlands >=20ha so columns removed from df.
+
+```{r}
+nor_imd_df = tibble(
+  "IMDDecil" = c(1:10)) %>%
+  full_join(as_tibble(calc_imd(nor)), by = "IMDDecil") %>% 
+  rename("Decil_pop" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(nor_eucl_ne_acc_2ha_500m)), by = "IMDDecil") %>% 
+  rename("2ha_500m_eucl" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(nor_isochrone_ne_acc_2ha_500m)), by = "IMDDecil") %>% 
+  rename("2ha_500m_iso" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(nor_eucl_ne_acc_1260m)), by = "IMDDecil") %>% 
+  rename("1260m_eucl" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(nor_isochrone_ne_acc_1260m)), by = "IMDDecil") %>% 
+  rename("1260m_iso" = "Total_pop") %>% 
+  select("IMDDecil", "Decil_pop", "2ha_500m_eucl", "2ha_500m_iso", "1260m_eucl", "1260m_iso")
+
+nor_imd_df
+```
+
+
+## Export
+
+Export shapefiles for use in ArcGIS etc
+
+```{r, warning=FALSE, fig.width=13}
+# Access Points
+writeVector(x = nor_accp,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Access Points/nor_accp_all.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_accp_ne_acc,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Access Points/nor_accp_NE_accessible.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_accp_ne_acc_2ha,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Access Points/nor_accp_NE_accessible_2ha.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_accp_ne_acc_20ha,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Access Points/nor_accp_NE_accessible_20ha.shp",
+            filetype = "ESRI Shapefile")
+
+# AOIs
+writeVector(x = nor,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/AOIs/nor.shp",
+            filetype = "ESRI Shapefile")
+
+# Euclidean
+writeVector(x = nor_eucl_ne_acc_1260m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Euclidean/nor_eucl_accp_NE_accessible_1260m.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_eucl_ne_acc_2ha_500m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Euclidean/nor_eucl_accp_NE_accessible_2ha_500m.shp",
+            filetype = "ESRI Shapefile")
+
+#writeVector(x = nor_eucl_ne_acc_20ha_4km,
+#            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Euclidean/nor_eucl_accp_NE_accessible_20ha_4km.shp",
+#            filetype = "ESRI Shapefile")
+
+# IMD
+writeVector(x = nor_imd,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/IMD/nor_imd.shp",
+            filetype = "ESRI Shapefile")
+
+# Isochrones
+writeVector(x = nor_isochrone_ne_acc_1260m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Isochrones/nor_isochrone_ne_acc_1260m.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_isochrone_ne_acc_2ha_500m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Isochrones/nor_isochrone_ne_acc_2ha_500m.shp",
+            filetype = "ESRI Shapefile")
+
+#writeVector(x = nor_isochrone_ne_acc_20ha_4km,
+#            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Isochrones/nor_isochrone_ne_acc_20ha_4km.shp",
+#            filetype = "ESRI Shapefile")
+
+# Networks
+writeVector(x = nor_roads,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Networks/nor_roads.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_prows,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Networks/nor_prows.shp",
+            filetype = "ESRI Shapefile")
+
+# Woodlands
+writeVector(x = nor_woodlands_ne,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/nor_woodlands_NE.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_woodlands_ne_20m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/nor_woodlands_NE_20m_buffer.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_woodlands_ne_acc,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/nor_woodlands_NE_acc.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_woodlands_ne_acc_20m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/nor_woodlands_NE_acc_20m_buffer.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_woodlands_ne_acc_2ha,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/nor_woodlands_NE_2ha.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = nor_woodlands_ne_acc_2ha_20m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/nor_woodlands_NE_2ha_buff20m.shp",
+            filetype = "ESRI Shapefile")
+
+#writeVector(x = nor_woodlands_ne_acc_20ha,
+#            filename = "Woodlands/nor_woodlands_NE_2ha.shp",
+#            filetype = "ESRI Shapefile")
+
+#writeVector(x = nor_woodlands_ne_acc_20ha_20m,
+#            filename = "Woodlands/nor_woodlands_NE_2ha_buff20m.shp",
+#            filetype = "ESRI Shapefile")
+
+```
+
+
+
+# High Wycombe
+
+## Data Handling
+
+### AOI
+
+Create AOI around High Wycombe the same size as the original Warrington example.
+
+```{r, warning=FALSE}
+hwyc_east = 486734
+hwyc_north = 193067
+
+hwyc_df = tibble(
+  "Corner" = c("NW", "NE", "SW", "SE"),
+  "x" = c(hwyc_east-(width/2), hwyc_east+(width/2), hwyc_east-(width/2), hwyc_east+(width/2)),
+  "y" = c(hwyc_north+(height/2), hwyc_north+(height/2), hwyc_north-(height/2), hwyc_north-(height/2)))
+
+hwyc = vect(x = hwyc_df,
+           geom = c("x", "y"),
+           crs = "epsg:27700") %>%  # British National Grid
+  as.polygons(extent = T)
+```
+
+### Data Import
+
+```{r, warning=FALSE}
+hwyc_accp = vect("Y:/PersonalFolders/AliceH/Handovers/NCF_Public_Access/Data/Downloaded_data/OS_data/OS_Greenspace_AccessPoints.shp",
+                extent = hwyc)
+
+hwyc_prows = vect("Y:/ExternalProjects/NCF Access/NE_greenspace/Green_and_Blue_Infrastructure_NE_GeoPackage - working copy/Green_and_Blue_Infrastructure_NE_GeoPackage/Green_Infrastructure_Linear_Access/Linear_access_network.gpkg",
+                 layer = "Map5_England_PROW_Update2022",
+                 extent = hwyc) %>% crop(hwyc)
+
+hwyc_roads = vect("Z:/CESB/Land Use and Ecosystem Service/GIS_Data/_Data/OS_data/OS_Open_Data/oproad_gpkg_gb/Data/oproad_gb.gpkg",
+                  layer = "road_link",
+                  extent = hwyc) %>% crop(hwyc)
+
+hwyc_woodlands_ne = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/NE_GreenInfrastructure/Green_Infrastructure_access_maps.gpkg",  # cannot access file in Projects folder for some reason
+                         layer = "Map4_woodlands",
+                         extent = hwyc) %>% crop(hwyc)
+
+hwyc_woodlands_ne_acc = hwyc_woodlands_ne %>%
+  filter(AccessLevel == "Accessible")
+
+hwyc_woodlands_w4p = vect("Y:/ExternalProjects/NCF Access/woods_for_people_2023 1.geojson",
+                         extent = hwyc) %>%
+  crop(hwyc) %>%
+  rename("restricted_information" = "restricted information")
+
+hwyc_woodlands_w4p = hwyc_woodlands_w4p %>%
+  mutate("Area_ha" = expanse(hwyc_woodlands_w4p, unit = "ha"))
+
+hwyc_woodlands_w4p_acc = hwyc_woodlands_w4p %>% 
+  filter(restricted_information == "unrestricted")
+```
+
+### Woodland Access Points
+
+```{r, warning=FALSE, fig.width=13}
+hwyc_woodlands_ne_20m = buffer(hwyc_woodlands_ne, width = 20) %>% aggregate()
+hwyc_woodlands_ne_acc_20m = buffer(hwyc_woodlands_ne_acc, width = 20) %>% aggregate()
+
+hwyc_accp_ne = crop(hwyc_accp, hwyc_woodlands_ne_20m)
+hwyc_accp_ne_acc = crop(hwyc_accp, hwyc_woodlands_ne_acc_20m)
+```
+
+## Compare NE and W4P datasets
+
+```{r, warning=FALSE, fig.width=13}
+ggplot() + 
+  geom_spatvector(data = hwyc_woodlands_ne,
+                  mapping = aes(fill = AccessLevel),
+                  color = NA) +
+  scale_fill_manual("NE Woodlands",
+                    values = pal_woodlands) +
+  
+  geom_spatvector(data = hwyc_woodlands_w4p,
+                  mapping = aes(color = restricted_information),
+                  fill = NA,
+                  linewidth = 0.8) +
+  scale_color_manual("W4P Woodlands",
+                     values = pal_woodlands) +
+  
+  geom_spatvector(data = hwyc_roads,
+                  color = pal_roads) +
+  
+  #geom_spatvector(data = hwyc_prows,
+  #                color = pal_prows) +
+  
+  labs(title = "Comparing Woodland Datasets",
+       caption = "High Wycombe, UK") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+#ggsave("hwyc_woodland_datasets.png", x, dpi = 300, units = "cm", width = 35, height = 25)
+```
+
+## Woodland Access Standard (WT)
+
+500m from woodland >= 2ha and 4km from a woodland >= 20ha.
+
+Firstly filter those woodlands and identify associated access points. No woodlands >=20 ha.
+
+```{r, warning=FALSE, fig.width=13}
+hwyc_woodlands_ne_acc_2ha = hwyc_woodlands_ne_acc %>% filter(Area_ha >= 2)
+hwyc_woodlands_ne_acc_20ha = hwyc_woodlands_ne_acc %>% filter(Area_ha >= 20)
+
+hwyc_accp_ne_acc_2ha = crop(hwyc_accp, buffer(hwyc_woodlands_ne_acc_2ha, width = 20) %>% aggregate())
+hwyc_accp_ne_acc_20ha = crop(hwyc_accp, buffer(hwyc_woodlands_ne_acc_20ha, width = 20) %>% aggregate())
+```
+
+Euclidean
+
+```{r}
+hwyc_eucl_ne_acc_2ha_500m = 
+  hwyc_accp_ne_acc_2ha %>%
+  buffer(width = 500) %>%  
+  aggregate()
+
+hwyc_eucl_ne_acc_20ha_4km = 
+  hwyc_accp_ne_acc_20ha %>%
+  buffer(width = 4000) %>%
+  aggregate()
+
+hwyc_eucl_ne_acc_2ha_500m = 
+  hwyc_accp_ne_acc_2ha %>%
+  buffer(width = 500) %>%  
+  aggregate()
+
+hwyc_eucl_ne_acc_20ha_4km = 
+  hwyc_accp_ne_acc_20ha %>%
+  buffer(width = 4000) %>%
+  aggregate()
+```
+
+Path Network
+
+```{r}
+#hwyc_path_ne_acc_2ha_500m = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Path Networks/nor_path_ne_acc_2ha_500m.shp")
+
+#hwyc_path_ne_acc_2ha_500m_buff = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Path Networks/nor_path_ne_acc_2ha_500m_buff50m.shp")
+```
+
+Isochrone
+
+Write function here?
+
+```{r}
+hwyc_isochrone_ne_acc_2ha_500m = mb_isochrone(
+  st_as_sf(hwyc_accp_ne_acc_2ha),
+  distance = 500,
+  profile = "walking"
+) %>% 
+  st_transform(crs = 27700) %>% 
+  vect() %>% 
+  aggregate()
+
+hwyc_isochrone_ne_acc_20ha_4km = mb_isochrone(
+  st_as_sf(hwyc_accp_ne_acc_20ha),
+  distance = 4000,
+  profile = "walking"
+) %>% 
+  st_transform(crs = 27700) %>% 
+  vect() %>% 
+  aggregate()
+```
+
+
+## Accessible Greenspace Standard (NE)
+
+15mins from accessible greenspace.
+
+Euclidean
+
+```{r}
+hwyc_eucl_ne_acc_1260m = 
+  hwyc_accp_ne_acc %>%
+  buffer(width = 1260) %>%  # 15 mins walking at 1.4 m/s
+  aggregate()
+```
+
+Path Network
+
+```{r}
+#nor_path_ne_acc_1260m = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Path Networks/nor_path_ne_acc_1260m.shp")
+
+#nor_path_ne_acc_1260m_buff = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Path Networks/nor_path_ne_acc_1260m_buff50m.shp")
+```
+
+Isochrone
+
+```{r}
+hwyc_isochrone_ne_acc_1260m = mb_isochrone(
+  st_as_sf(hwyc_accp_ne_acc),
+  distance = 1260,
+  profile = "walking"
+) %>% 
+  st_transform(crs = 27700) %>%
+  vect() %>% 
+  aggregate()
+```
+
+
+## PROWs in Woodlands
+
+```{r}
+hwyc_accp_ne_prows = terra::intersect(as.lines(hwyc_woodlands_ne),
+                                      hwyc_prows) %>% 
+  mutate("accesstype" = "PROW")
+```
+
+Knowing which PRoWs intersect which woodlands will be important for network analysis and mapping.
+ 
+```{r}
+hwyc_prowswoodlands_df = relate(
+  x = hwyc_woodlands_ne, 
+  y = hwyc_prows,
+  relation = "intersects",
+  pairs = TRUE) %>% 
+  as_tibble()
+
+hwyc_prowswoodlands_df
+```
+
+```{r, warning=FALSE, fig.width=13}
+ggplot() + 
+  geom_spatvector(data = hwyc_woodlands_ne,
+                  mapping = aes(fill = AccessLevel),
+                  color = NA) +
+  scale_fill_manual("NE Woodlands",
+                    values = pal_woodlands) +
+  
+  geom_spatvector(data = hwyc_roads,
+                  color = pal_roads) +
+  
+  geom_spatvector(data = hwyc_prows,
+                  color = pal_prows) +
+  
+  new_scale_color() +
+  geom_spatvector(data = hwyc_accp_ne_acc,
+                  mapping = aes(color = accesstype)) +
+  scale_color_manual("Woodland Access Point Type (OS)",
+                     values = pal_accp) +
+  
+  new_scale_color() +
+  geom_spatvector(data = hwyc_accp_ne_prows,
+                  mapping = aes(color = accesstype),
+                  fill = "#C00000") +
+  scale_color_manual("PRoW Woodland Access Point",
+                     values = pal_accp) +
+  
+  labs(title = "Woodland Access via PROWs",
+       caption = "High Wycombe, UK") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+#ggsave("hwyc_prows_access.png", x, dpi = 300, units = "cm", width = 35, height = 25)
+```
+
+## IMD
+
+Summary Table
+
+```{r}
+hwyc_imd_df = tibble(
+  "IMDDecil" = c(1:10)) %>%
+  full_join(as_tibble(calc_imd(hwyc)), by = "IMDDecil") %>% 
+  rename("Decil_pop" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(hwyc_eucl_ne_acc_2ha_500m)), by = "IMDDecil") %>% 
+  rename("2ha_500m_eucl" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(hwyc_isochrone_ne_acc_2ha_500m)), by = "IMDDecil") %>% 
+  rename("2ha_500m_iso" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(hwyc_eucl_ne_acc_20ha_4km)), by = "IMDDecil") %>% 
+  rename("20ha_4km_eucl" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(hwyc_isochrone_ne_acc_20ha_4km)), by = "IMDDecil") %>% 
+  rename("20ha_4km_iso" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(hwyc_eucl_ne_acc_1260m)), by = "IMDDecil") %>% 
+  rename("1260m_eucl" = "Total_pop") %>% 
+  full_join(as_tibble(calc_imd(hwyc_isochrone_ne_acc_1260m)), by = "IMDDecil") %>% 
+  rename("1260m_iso" = "Total_pop") %>% 
+  select("IMDDecil", "Decil_pop", "2ha_500m_eucl", "2ha_500m_iso", "20ha_4km_eucl", "20ha_4km_iso", "1260m_eucl", "1260m_iso")
+
+hwyc_imd_df
+```
+
+
+
+
+## Export
+
+Export shapefiles for use in ArcGIS etc
+
+```{r, warning=FALSE, fig.width=13}
+# Access Points
+writeVector(x = hwyc_accp,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Access Points/hwyc_accp_all.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_accp_ne_acc,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Access Points/hwyc_accp_NE_accessible.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_accp_ne_acc_2ha,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Access Points/hwyc_accp_NE_accessible_2ha.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_accp_ne_acc_20ha,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Access Points/hwyc_accp_NE_accessible_20ha.shp",
+            filetype = "ESRI Shapefile")
+
+# AOIs
+writeVector(x = hwyc,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/AOIs/hwyc.shp",
+            filetype = "ESRI Shapefile")
+
+# Euclidean
+writeVector(x = hwyc_eucl_ne_acc_1260m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Euclidean/hwyc_eucl_accp_NE_accessible_1260m.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_eucl_ne_acc_2ha_500m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Euclidean/hwyc_eucl_accp_NE_accessible_2ha_500m.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_eucl_ne_acc_20ha_4km,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Euclidean/hwyc_eucl_accp_NE_accessible_20ha_4km.shp",
+            filetype = "ESRI Shapefile")
+
+# IMD
+writeVector(x = hwyc_imd,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/IMD/hwyc_imd.shp",
+            filetype = "ESRI Shapefile")
+
+
+# Isochrones
+writeVector(x = hwyc_isochrone_ne_acc_1260m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Isochrones/hwyc_isochrone_ne_acc_1260m.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_isochrone_ne_acc_2ha_500m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Isochrones/hwyc_isochrone_ne_acc_2ha_500m.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_isochrone_ne_acc_20ha_4km,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Isochrones/hwyc_isochrone_ne_acc_20ha_4km.shp",
+            filetype = "ESRI Shapefile")
+
+# Networks
+writeVector(x = hwyc_roads,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Networks/hwyc_roads.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_prows,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Networks/hwyc_prows.shp",
+            filetype = "ESRI Shapefile")
+
+# Woodlands
+writeVector(x = hwyc_woodlands_ne,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/hwyc_woodlands_NE.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_woodlands_ne_20m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/hwyc_woodlands_NE_20m_buffer.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_woodlands_ne_acc,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/hwyc_woodlands_NE_acc.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_woodlands_ne_acc_20m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/hwyc_woodlands_NE_acc_20m_buffer.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_woodlands_ne_acc_2ha,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/hwyc_woodlands_NE_2ha.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_woodlands_ne_acc_2ha_20m,
+            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/hwyc_woodlands_NE_2ha_buff20m.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_woodlands_ne_acc_20ha,
+            filename = "Woodlands/hwyc_woodlands_NE_2ha.shp",
+            filetype = "ESRI Shapefile")
+
+writeVector(x = hwyc_woodlands_ne_acc_20ha_20m,
+            filename = "Woodlands/hwyc_woodlands_NE_2ha_buff20m.shp",
+            filetype = "ESRI Shapefile")
+
+```
+
+# Woodland Areas
+
+```{r, warning=FALSE}
+woodlands_ne_areas = tibble(
+  "AOI" = c("Warrington", "Northampton", "High Wycombe"),
+  "Accessible_Woodland_Cover" = c(expanse(aggregate(warr_woodlands_ne %>% filter(AccessLevel == "Accessible")))/expanse(warr)*100,
+                                  expanse(aggregate(nor_woodlands_ne_acc))/expanse(nor)*100,
+                                  expanse(aggregate(hwyc_woodlands_ne_acc))/expanse(hwyc)*100),
+  "Non_Accessible_Woodland_Cover" = c(expanse(aggregate(warr_woodlands_ne %>% filter(AccessLevel == "Non Accessible")))/expanse(warr)*100,
+                                      expanse(aggregate(nor_woodlands_ne %>% filter(AccessLevel == "Non Accessible")))/expanse(nor)*100,
+                                      expanse(aggregate(hwyc_woodlands_ne %>% filter(AccessLevel == "Non Accessible")))/expanse(hwyc)*100),
+) %>% 
+  mutate("Total_Woodland_Cover" = Accessible_Woodland_Cover + Non_Accessible_Woodland_Cover,
+         "Percentage_Accessible" = Accessible_Woodland_Cover / Total_Woodland_Cover * 100)
+  
+woodlands_ne_areas
+```
+
+
+# Comparing Woodland datasets
+
+## AOIs
+
+```{r}
+bris_df = tibble(
+  "Corner" = c("NW", "NE", "SW", "SE"),
+  "x" = c(352768, 367539, 352768, 367539),
+  "y" = c(183249, 183249, 166906, 166906))
+
+bris = vect(x = bris_df,
+            geom = c("x", "y"),
+            crs = "epsg:27700") %>%  # British National Grid
+  as.polygons(extent = T)
+```
+
+## Woodland datasets
+
+```{r, warning=FALSE}
+bris_woodlands_ne = vect("Y:/PersonalFolders/Joe/NCF_Public_Access/NE_GreenInfrastructure/Green_Infrastructure_access_maps.gpkg",  # cannot access file in Projects folder for some reason
+                         layer = "Map4_woodlands",
+                         extent = bris) %>% crop(bris)
+
+bris_woodlands_w4p = vect("Y:/ExternalProjects/NCF Access/woods_for_people_2023 1.geojson",
+                         extent = bris) %>%
+  crop(bris) %>%
+  rename("restricted_information" = "restricted information")
+```
+
+## Mapping
+
+```{r, warning=FALSE, fig.width=13}
+ggplot() + 
+  geom_spatvector(data = bris_woodlands_ne,
+                  mapping = aes(fill = AccessLevel),
+                  color = NA) +
+  scale_fill_manual("NE Woodlands",
+                    values = pal_woodlands) +
+  
+  geom_spatvector(data = bris_woodlands_w4p,
+                  mapping = aes(color = restricted_information),
+                  fill = NA,
+                  linewidth = 0.5) +
+  scale_color_manual("W4P Woodlands",
+                     values = c("red", "darkgreen")) +
+  
+  labs(title = "Comparing Woodland Datasets",
+       caption = "Bristol, UK") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Export
+
+```{r}
+#ggsave("bris_woodland_datasets.png", x, dpi = 300, units = "cm", width = 35, height = 25)
+
+#writeVector(x = bris_woodlands_ne,
+#            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/bris_woodlands_NE.shp",
+#            filetype = "ESRI Shapefile")
+
+#writeVector(x = bris_woodlands_w4p,
+#            filename = "Y:/PersonalFolders/Joe/NCF_Public_Access/Case Studies/Woodlands/bris_woodlands_w4p.shp",
+#            filetype = "ESRI Shapefile")
+```
